@@ -1,0 +1,12 @@
+<div class="max-w-md">
+  <label for="<%= @dom_id %>" class="block mb-2.5 text-sm font-medium text-heading"><%= @label %></label>
+  <select id="<%= @dom_id %>" name="<%= @name %>" class="bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full px-3 py-2.5 shadow-xs" <%= tag.attributes(@html_options) %>>
+    <% @options.each do |opt| %>
+      <% if opt.is_a?(Array) %>
+        <option value="<%= opt[1] %>" <%= "selected" if @selected.to_s == opt[1].to_s %>><%= opt[0] %></option>
+      <% else %>
+        <option value="<%= opt %>" <%= "selected" if @selected.to_s == opt.to_s %>><%= opt %></option>
+      <% end %>
+    <% end %>
+  </select>
+</div>

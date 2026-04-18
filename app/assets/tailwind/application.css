@@ -1,0 +1,266 @@
+@import "tailwindcss";
+@import "flowbite/src/themes/default";
+
+@plugin "flowbite/plugin";
+@source "../../../node_modules/flowbite";
+@source "../../javascript";
+@source "../../views";
+
+/*
+ * ============================================================
+ * Kreoz Design System — Tailwind CSS v4
+ * Base: 16px = 1rem
+ * ============================================================
+ */
+
+@theme {
+  /* ── Flowbite Primary Color Scale (Retro Cyan #00FFCC) ── */
+  --color-primary-50: #0a1f1a;
+  --color-primary-100: #0d2e26;
+  --color-primary-200: #134d40;
+  --color-primary-300: #1a7a66;
+  --color-primary-400: #22b894;
+  --color-primary-500: #00FFCC;
+  --color-primary-600: #33ffd6;
+  --color-primary-700: #00FFCC;
+  --color-primary-800: #00cc99;
+  --color-primary-900: #009977;
+
+  /* ── Flowbite Brand → Primary ── */
+  --color-brand-softer: var(--color-primary-50);
+  --color-brand-soft: var(--color-primary-100);
+  --color-brand: var(--color-primary-700);
+  --color-brand-medium: var(--color-primary-200);
+  --color-brand-strong: var(--color-primary-800);
+  --color-brand-subtle: var(--color-primary-200);
+  --color-brand-light: var(--color-primary-600);
+  --color-fg-brand-subtle: var(--color-primary-200);
+  --color-fg-brand: var(--color-primary-700);
+  --color-fg-brand-strong: var(--color-primary-900);
+
+  /* ── Colors: Brand (Retro 8-bit matte palette) ── */
+  --color-kreoz-green: #2dd4a0;
+  --color-kreoz-green-dark: #1a7a5e;
+  --color-kreoz-green-light: #0d2a1f;
+
+  --color-kreoz-amber: #e6b800;
+  --color-kreoz-amber-dark: #8a6e00;
+  --color-kreoz-amber-light: #2a2400;
+
+  --color-kreoz-red: #e85d75;
+  --color-kreoz-red-dark: #8a2e3f;
+  --color-kreoz-red-light: #2a0d16;
+
+  --color-kreoz-purple: #9b6dff;
+  --color-kreoz-purple-light: #1a0d2a;
+
+  /* ── Colors: Neutrals (Dark shades) ── */
+  --color-grafito: #e0e0e0;
+  --color-gris: #888888;
+  --color-gris-claro: #555555;
+  --color-fondo: #0a0a0f;
+  --color-fondo-card: #141420;
+  --color-borde: #2a2a3a;
+  --color-dots-inactive: #333344;
+
+  /* ── Typography: Font family (Retro monospace) ── */
+  --font-sans: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace;
+
+  /* ── Typography: Sizes (rem, base 16px) ── */
+  --font-size-hero: 2.25rem;
+  --font-size-title: 1.375rem;
+  --font-size-subtitle: 0.9375rem;
+  --font-size-body: 0.875rem;
+  --font-size-caption: 0.8125rem;
+  --font-size-small: 0.75rem;
+  --font-size-xs: 0.6875rem;
+
+  /* ── Spacing: Component-specific ── */
+  --spacing-fab-shadow: 0 0.25rem 1rem rgba(0, 255, 204, 0.25);
+  --spacing-btn-circle: 2.25rem;
+  --spacing-dot-w: 1.5rem;
+  --spacing-dot-h: 0.25rem;
+  --spacing-icon-sm: 1.125rem;
+
+  /* ── Border radius (rounded) ── */
+  --radius-card: 1rem;
+  --radius-btn: 0.75rem;
+  --radius-dot: 0.25rem;
+  --radius-full: 9999px;
+
+  /* ── Shadows (retro glow) ── */
+  --shadow-card: 0 0 0.5rem rgba(0, 255, 204, 0.08);
+  --shadow-fab: 0 0.25rem 1rem rgba(255, 215, 0, 0.3);
+}
+
+/* ── Base: 16px root, font family, dark background ── */
+@layer base {
+  html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: var(--font-size-body);
+    color: var(--color-grafito);
+    background-color: var(--color-fondo);
+    line-height: 1.5;
+  }
+
+  /* Dark mode form inputs */
+  input, textarea, select {
+    background-color: var(--color-fondo) !important;
+    color: var(--color-grafito) !important;
+    border-color: var(--color-borde) !important;
+  }
+}
+
+/* ── Component utilities ── */
+@layer components {
+  /* Cards */
+  .card {
+    background-color: var(--color-fondo-card);
+    border: 1px solid var(--color-borde);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .card-insight-positive {
+    background-color: var(--color-kreoz-green-light);
+    color: var(--color-kreoz-green-dark);
+    border-left: 0.25rem solid var(--color-kreoz-green);
+  }
+
+  .card-insight-alert {
+    background-color: var(--color-kreoz-amber-light);
+    color: #633806;
+    border-left: 0.25rem solid var(--color-kreoz-amber);
+  }
+
+  .card-insight-negative {
+    background-color: var(--color-kreoz-red-light);
+    color: var(--color-kreoz-red-dark);
+    border-left: 0.25rem solid var(--color-kreoz-red);
+  }
+
+  /* FAB — "Suma a tu negocio" */
+  .fab {
+    position: fixed;
+    bottom: 5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: var(--color-kreoz-amber);
+    color: var(--color-kreoz-amber-dark);
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-full);
+    box-shadow: var(--shadow-fab);
+    z-index: 50;
+  }
+
+  /* Progress dots */
+  .progress-dot {
+    width: var(--spacing-dot-w);
+    height: var(--spacing-dot-h);
+    border-radius: var(--radius-dot);
+    background-color: var(--color-dots-inactive);
+  }
+
+  .progress-dot-active-green { background-color: var(--color-kreoz-green); }
+  .progress-dot-active-red { background-color: var(--color-kreoz-red); }
+  .progress-dot-active-amber { background-color: var(--color-kreoz-amber); }
+
+  /* Buttons — bright matte colors */
+  .btn-sm {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.375rem 0.75rem;
+    border-radius: var(--radius-btn);
+    cursor: pointer;
+  }
+
+  .btn-primary {
+    background-color: #2dd4a0;
+    color: #0a0a0f;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-btn);
+  }
+
+  .btn-secondary {
+    border: 2px solid #2dd4a0;
+    color: #2dd4a0;
+    background-color: transparent;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-btn);
+  }
+
+  .btn-tertiary {
+    color: var(--color-gris);
+    background: none;
+    border: none;
+    padding: 0.75rem 1.5rem;
+  }
+
+  .btn-destructive {
+    background-color: #e85d75;
+    color: #0a0a0f;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-btn);
+  }
+
+  .btn-circle {
+    width: var(--spacing-btn-circle);
+    height: var(--spacing-btn-circle);
+    border-radius: var(--radius-full);
+    background-color: #2dd4a0;
+    color: #0a0a0f;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Tab bar */
+  .tab-bar {
+    background-color: var(--color-fondo-card);
+    border-top: 1px solid var(--color-borde);
+  }
+
+  .tab-active {
+    color: var(--color-kreoz-green);
+    font-weight: 700;
+  }
+
+  .tab-inactive {
+    color: var(--color-gris-claro);
+  }
+
+  /* Metric card */
+  .metric-card {
+    background-color: var(--color-fondo-card);
+    border: 1px solid var(--color-borde);
+    border-radius: var(--radius-card);
+    padding: 1rem;
+  }
+
+  .metric-value {
+    font-size: var(--font-size-title);
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .metric-hero {
+    font-size: var(--font-size-hero);
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .metric-label {
+    font-size: var(--font-size-small);
+    color: var(--color-gris);
+  }
+}

@@ -1,0 +1,233 @@
+# Kreoz — Rubocop Configuration
+#
+# Philosophy: Catch bugs and security issues. Enforce real conventions.
+# Don't waste time on bikeshedding. Spanish domain names are intentional.
+#
+# Base: rubocop-rails-omakase (DHH's defaults)
+# Extensions: rubocop-rails, rubocop-performance (loaded by omakase)
+
+inherit_gem: { rubocop-rails-omakase: rubocop.yml }
+
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  Exclude:
+    - "bin/**/*"
+    - "db/schema.rb"
+    - "db/queue_schema.rb"
+    - "db/cache_schema.rb"
+    - "db/cable_schema.rb"
+    - "node_modules/**/*"
+
+# ViewComponent::Base#initialize takes no args — calling super forwards
+# keyword args and is incorrect. Components don't need super.
+Lint/MissingSuper:
+  Exclude:
+    - "app/components/**/*"
+    - "vendor/**/*"
+    - "tmp/**/*"
+    - "storage/**/*"
+
+# ============================================================
+# LINT — These catch real bugs. Enable aggressively.
+# ============================================================
+Lint:
+  Enabled: true
+
+# Allow `_` prefixed unused variables (common in Ruby blocks)
+Lint/UnusedMethodArgument:
+  AllowUnusedKeywordArguments: true
+
+Lint/UnusedBlockArgument:
+  AllowUnusedKeywordArguments: true
+
+# ============================================================
+# SECURITY — Non-negotiable. Every cop enabled.
+# ============================================================
+Security:
+  Enabled: true
+
+# ============================================================
+# PERFORMANCE — Enable the ones that matter for a Rails app.
+# ============================================================
+Performance:
+  Enabled: true
+  Exclude:
+    - "test/**/*"
+
+# ============================================================
+# RAILS — Enable cops that catch real Rails mistakes.
+# ============================================================
+Rails:
+  Enabled: true
+
+# We use ActsAsTenant, not default_scope. Flag default_scope usage.
+Rails/DefaultScope:
+  Enabled: true
+
+# We use string + CHECK, never Rails enum. Flag it.
+Rails/EnumHash:
+  Enabled: true
+
+Rails/EnumUniqueness:
+  Enabled: true
+
+# Always use presence validation at model level, not just DB.
+Rails/Presence:
+  Enabled: true
+
+# Turbo requires unprocessable_entity for validation failures.
+Rails/HttpStatus:
+  Enabled: true
+  EnforcedStyle: symbolic
+
+# Catch N+1-prone patterns.
+Rails/HasManyOrHasOneDependent:
+  Enabled: true
+
+# Enforce explicit foreign keys in migrations.
+Rails/NotNullColumn:
+  Enabled: true
+
+# Don't skip validations silently.
+Rails/SkipsModelValidations:
+  Enabled: true
+  Exclude:
+    - "db/migrate/**/*"
+    - "test/**/*"
+
+# Catch dangerous migrations.
+Rails/ReversibleMigration:
+  Enabled: true
+
+# Prefer where.not over SQL NOT.
+Rails/WhereNot:
+  Enabled: true
+
+# ============================================================
+# METRICS — Generous but not infinite. Rails code can be long.
+# ============================================================
+Metrics/MethodLength:
+  Enabled: true
+  Max: 25
+  Exclude:
+    - "db/migrate/**/*"
+    - "test/**/*"
+
+Metrics/ClassLength:
+  Enabled: true
+  Max: 200
+  Exclude:
+    - "test/**/*"
+
+Metrics/AbcSize:
+  Enabled: true
+  Max: 30
+  Exclude:
+    - "db/migrate/**/*"
+    - "test/**/*"
+
+Metrics/BlockLength:
+  Enabled: true
+  Max: 30
+  Exclude:
+    - "config/**/*"
+    - "db/migrate/**/*"
+    - "test/**/*"
+    - "lib/tasks/**/*"
+
+Metrics/CyclomaticComplexity:
+  Enabled: true
+  Max: 10
+
+Metrics/PerceivedComplexity:
+  Enabled: true
+  Max: 12
+
+# ============================================================
+# NAMING — Permissive. Spanish domain names are intentional.
+# ============================================================
+
+# Spanish method names like `entrada?`, `del_negocio` are fine.
+Naming/PredicatePrefix:
+  Enabled: false
+
+# Spanish variables like `monto_total`, `fecha_inicio` are fine.
+Naming/VariableNumber:
+  Enabled: false
+
+# Allow short method names like `te_ganaste`, `call`.
+Naming/MethodName:
+  Enabled: false
+
+# Allow `e` in rescue, `m` in blocks, etc.
+Naming/MethodParameterName:
+  MinNameLength: 1
+
+# ============================================================
+# STYLE — Keep omakase defaults, override only what Kreoz needs.
+# ============================================================
+
+# Frozen string literal is noise in Rails 8 (Ruby 3.4 doesn't need it).
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+# We use `def entrada? = tipo == "entrada"` (endless methods). Allow it.
+Style/EndlessMethod:
+  Enabled: false
+
+# Allow `Data.define` (Ruby 3.2+) for service return values.
+Style/StructInheritance:
+  Enabled: false
+
+# We use guard clauses when they read well, not as a mandate.
+Style/GuardClause:
+  Enabled: false
+
+# Allow both `if !condition` and `unless condition`. Context matters.
+Style/NegatedIf:
+  Enabled: false
+
+# Don't force documentation on every class. The code is the documentation.
+Style/Documentation:
+  Enabled: false
+
+# Allow `fail` in addition to `raise`.
+Style/SignalException:
+  Enabled: false
+
+# Allow both lambda styles. `->` for short, `lambda` for long.
+Style/Lambda:
+  Enabled: false
+
+# We use `%w[]` per omakase. Keep it.
+Style/WordArray:
+  Enabled: true
+  MinSize: 3
+
+Style/SymbolArray:
+  Enabled: true
+  MinSize: 3
+
+# Prefer `each_with_object` over `inject` for building hashes/arrays.
+Style/EachWithObject:
+  Enabled: true
+
+# Catch `if x == nil` (use `x.nil?` instead).
+Style/NilComparison:
+  Enabled: true
+
+# Prefer `map` over `collect`, `detect` over `find`, etc.
+Style/CollectionMethods:
+  Enabled: false
+
+# ============================================================
+# LAYOUT — Keep omakase defaults, add line length.
+# ============================================================
+Layout/LineLength:
+  Enabled: true
+  Max: 140
+  Exclude:
+    - "db/migrate/**/*"
+    - "config/**/*"
+    - "test/**/*"

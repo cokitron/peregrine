@@ -1,0 +1,94 @@
+<% content_for(:title) { "Workflows" } %>
+
+<div class="flex items-center justify-between mb-8">
+  <h1 class="text-2xl font-bold text-grafito">Workflows</h1>
+  <%= link_to new_workflow_path, class: "btn-primary" do %>
+    + New Workflow
+  <% end %>
+</div>
+
+<% if @workflows.any? %>
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <% @workflows.each do |wf| %>
+      <% steps = wf.drawflow_data["steps"] %>
+      <% runs = wf.workflow_runs.recientes.limit(5) %>
+      <div class="card p-5 hover:border-kreoz-green transition-colors group relative">
+        <%= link_to workflow_path(wf), class: "block" do %>
+          <%# ── Title & status ── %>
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="font-semibold text-grafito group-hover:text-kreoz-green truncate pr-6"><%= wf.nombre %></h3>
+            <span class="shrink-0 px-2 py-0.5 rounded text-xs font-medium <%= wf.is_active ? 'bg-kreoz-green-light text-kreoz-green' : 'bg-gray-100 text-gris' %>">
+              <%= wf.is_active ? "Active" : "Inactive" %>
+            </span>
+          </div>
+
+          <% if wf.descripcion.present? %>
+            <p class="text-sm text-gris line-clamp-2 mb-3"><%= wf.descripcion %></p>
+          <% end %>
+
+          <%# ── Node pipeline ── %>
+          <% if steps.present? %>
+            <div class="flex items-center gap-1 mb-3 flex-wrap">
+              <% steps.each_with_index do |step, i| %>
+                <% s = node_style(step["type"]) %>
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium <%= s[:bg] %> <%= s[:text] %> <%= step["disabled"] ? "opacity-40 line-through" : "" %>">
+                  <%= s[:icon] %> <%= step["name"].presence || "#{step["type"]}_#{i + 1}" %>
+                </span>
+                <% if i < steps.size - 1 %>
+                  <span class="text-gris-claro text-xs">→</span>
+                <% end %>
+              <% end %>
+            </div>
+          <% else %>
+            <p class="text-xs text-gris-claro italic mb-3">No steps defined</p>
+          <% end %>
+
+          <%# ── Run history dots ── %>
+          <% if runs.any? %>
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-xs text-gris">Runs:</span>
+              <% runs.each do |run| %>
+                <span class="w-2 h-2 rounded-full <%= run_status_dot(run.status) %>" title="<%= run.status %> — <%= run.created_at.strftime('%b %d %H:%M') %>"></span>
+              <% end %>
+              <%= link_to "View all", workflow_runs_path(wf), class: "text-xs text-kreoz-green hover:underline ml-auto" %>
+            </div>
+          <% end %>
+
+          <%# ── Footer meta ── %>
+          <div class="flex items-center justify-between text-xs text-gris">
+            <span><%= pluralize(steps&.size || 0, "step") %> · Edited <%= time_ago_in_words(wf.updated_at) %> ago</span>
+            <% if (last = wf.last_run) %>
+              <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full <%= run_status_dot(last.status) %>"></span>
+                <%= last.status %>
+                <% if last.duration %><span>(<%= last.duration.round(1) %>s)</span><% end %>
+              </span>
+            <% end %>
+          </div>
+        <% end %>
+
+        <%# ── Delete button ── %>
+        <button class="absolute top-2 right-2 text-kreoz-red/60 hover:text-kreoz-red transition-colors p-1"
+                aria-label="Delete workflow <%= wf.nombre %>"
+                onclick="document.getElementById('delete-modal-<%= wf.id %>').showModal()">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        <dialog id="delete-modal-<%= wf.id %>" class="rounded-lg shadow-xl p-0 border border-borde backdrop:bg-grafito/50 open:flex open:flex-col">
+          <div class="p-6">
+            <p class="text-sm text-grafito mb-4">Delete <strong><%= wf.nombre %></strong>? This action cannot be undone.</p>
+            <div class="flex justify-end gap-2">
+              <button onclick="this.closest('dialog').close()" class="px-3 py-1.5 text-sm text-gris hover:text-grafito rounded-lg border border-borde">Cancel</button>
+              <%= button_to "Delete", workflow_path(wf), method: :delete, class: "px-3 py-1.5 text-sm bg-kreoz-red text-white rounded-lg font-semibold hover:bg-kreoz-red/90" %>
+            </div>
+          </div>
+        </dialog>
+      </div>
+    <% end %>
+  </div>
+<% else %>
+  <%= render Kreoz::EmptyStateComponent.new(
+    message: "Create your first workflow to chain Kiro CLI calls together.",
+    action_label: "+ New Workflow",
+    action_path: new_workflow_path
+  ) %>
+<% end %>

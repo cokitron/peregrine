@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "Flight Control" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= yield :head %>
+    <link rel="icon" href="/icon.png" type="image/png">
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body class="bg-fondo text-grafito font-sans">
+    <div class="flex min-h-screen">
+      <aside class="w-64 shrink-0 bg-fondo-card border-r border-borde flex flex-col">
+        <div class="px-6 py-5 border-b border-borde">
+          <span class="text-xl font-bold text-kreoz-green">Flight Control</span>
+        </div>
+
+        <nav class="flex-1 p-4 space-y-1">
+          <%= sidebar_link "Workflows", workflows_path, "M13 10V3L4 14h7v7l9-11h-7z" %>
+          <%= sidebar_link "Agents", agents_path, "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" %>
+        </nav>
+      </aside>
+
+      <main class="flex-1 p-8">
+        <% if alert = flash[:alert] %>
+          <div class="mb-6"><%= render Kreoz::AlertComponent.new(message: alert, variant: :negative, dismissible: true) %></div>
+        <% end %>
+        <% if notice = flash[:notice] %>
+          <div class="mb-6"><%= render Kreoz::AlertComponent.new(message: notice, variant: :positive, dismissible: true) %></div>
+        <% end %>
+        <%= yield %>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,102 @@
+<% content_for(:title) { "Run #{@run.created_at.strftime('%b %d %H:%M')} — #{@workflow.nombre}" } %>
+
+<div class="w-full max-w-4xl mx-auto">
+  <%# ── Header ── %>
+  <div class="flex items-center justify-between mb-8">
+    <div class="flex items-center gap-3">
+      <%= link_to workflow_runs_path(@workflow), class: "text-gris hover:text-grafito" do %>
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      <% end %>
+      <h1 class="text-2xl font-bold text-grafito">Run Details</h1>
+      <span class="px-2 py-0.5 rounded text-xs font-medium <%= run_status_badge(@run.status) %>"><%= @run.status.capitalize %></span>
+    </div>
+  </div>
+
+  <%# ── Summary Card ── %>
+  <div class="card p-6 mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div>
+        <p class="text-xs text-gris uppercase tracking-wide mb-1">Status</p>
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full <%= run_status_dot(@run.status) %>"></span>
+          <span class="font-semibold text-sm text-grafito"><%= @run.status.capitalize %></span>
+        </div>
+      </div>
+      <div>
+        <p class="text-xs text-gris uppercase tracking-wide mb-1">Started</p>
+        <span class="text-sm text-grafito"><%= @run.started_at&.strftime("%b %d, %H:%M:%S") || "—" %></span>
+      </div>
+      <div>
+        <p class="text-xs text-gris uppercase tracking-wide mb-1">Completed</p>
+        <span class="text-sm text-grafito"><%= @run.completed_at&.strftime("%b %d, %H:%M:%S") || "—" %></span>
+      </div>
+      <div>
+        <p class="text-xs text-gris uppercase tracking-wide mb-1">Duration</p>
+        <span class="text-sm font-semibold text-grafito"><%= @run.duration ? "#{@run.duration.round(2)}s" : "—" %></span>
+      </div>
+    </div>
+  </div>
+
+  <%# ── Input ── %>
+  <% if @run.input_text.present? %>
+    <div class="card p-5 mb-6">
+      <h3 class="text-xs font-medium text-gris uppercase tracking-wide mb-2">Input</h3>
+      <pre class="text-sm text-grafito bg-fondo rounded-lg p-3 overflow-x-auto whitespace-pre-wrap"><%= @run.input_text %></pre>
+    </div>
+  <% end %>
+
+  <%# ── Error ── %>
+  <% if @run.error_message.present? %>
+    <div class="card-insight-negative rounded-lg p-5 mb-6">
+      <h3 class="text-xs font-medium uppercase tracking-wide mb-2">Error</h3>
+      <pre class="text-sm overflow-x-auto whitespace-pre-wrap"><%= @run.error_message %></pre>
+    </div>
+  <% end %>
+
+  <%# ── Node Outcomes ── %>
+  <% steps = @workflow.drawflow_data["steps"] || [] %>
+  <% node_states = @run.node_states || {} %>
+
+  <% if steps.any? %>
+    <h3 class="text-sm font-semibold text-grafito mb-3">Node Outcomes</h3>
+    <div class="space-y-3">
+      <% steps.each_with_index do |step, i| %>
+        <% s = node_style(step["type"]) %>
+        <% state = node_states[step["name"]] %>
+        <% state_str = state.is_a?(Hash) ? state["status"] : state %>
+        <% output = state.is_a?(Hash) ? state["output"] : nil %>
+
+        <div class="card overflow-hidden">
+          <%# Node header %>
+          <% border_color = case state_str
+               when "completed" then "border-l-kreoz-green"
+               when "failed" then "border-l-kreoz-red"
+               when "running" then "border-l-kreoz-amber"
+               else "border-l-borde"
+             end %>
+          <div class="flex items-center gap-3 px-4 py-3 border-l-4 <%= border_color %>">
+            <span class="text-base"><%= s[:icon] %></span>
+            <span class="font-semibold text-sm text-grafito flex-1"><%= step["name"].presence || "#{step["type"]}_#{i + 1}" %></span>
+            <span class="px-2 py-0.5 rounded text-xs font-medium <%= s[:bg] %> <%= s[:text] %>"><%= step["type"].capitalize %></span>
+            <% if state_str %>
+              <span class="flex items-center gap-1 text-xs">
+                <span class="w-2 h-2 rounded-full <%= run_status_dot(state_str) %>"></span>
+                <%= state_str %>
+              </span>
+            <% else %>
+              <span class="text-xs text-gris-claro">Skipped</span>
+            <% end %>
+          </div>
+
+          <%# Node output %>
+          <% if output.present? %>
+            <details class="border-t border-borde" <%= state_str == "completed" || state_str == "failed" ? "open" : "" %>>
+              <summary class="px-4 py-2 text-xs text-gris cursor-pointer hover:text-grafito">Output (<%= output.length %> chars)</summary>
+              <pre class="px-4 py-3 bg-fondo text-xs text-grafito font-mono overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto"><%= output %></pre>
+            </details>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+</div>

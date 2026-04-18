@@ -1,0 +1,8 @@
+{
+  "name": "kreoz-rails",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "flowbite": "^4.0.1"
+  }
+}

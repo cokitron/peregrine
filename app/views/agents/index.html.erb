@@ -1,0 +1,29 @@
+<% content_for(:title) { "Agents" } %>
+
+<div class="flex items-center justify-between mb-8">
+  <h1 class="text-2xl font-bold text-grafito">Agents</h1>
+  <%= button_to "+ New Agent", agents_path, method: :post, class: "btn-primary" %>
+</div>
+
+<% if @agents.any? %>
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <% @agents.each do |agent| %>
+      <%= link_to agent_path(agent), class: "card p-5 hover:border-kreoz-green transition-colors group" do %>
+        <h3 class="font-semibold text-grafito group-hover:text-kreoz-green mb-2"><%= agent.nombre %></h3>
+        <% if agent.descripcion.present? %>
+          <p class="text-sm text-gris line-clamp-2 mb-3"><%= agent.descripcion %></p>
+        <% end %>
+        <p class="text-xs text-gris">
+          Steering: <%= pluralize(agent.steering_document.to_s.lines.count, "line") %>
+          · Edited <%= time_ago_in_words(agent.updated_at) %> ago
+        </p>
+      <% end %>
+    <% end %>
+  </div>
+<% else %>
+  <%= render Kreoz::EmptyStateComponent.new(
+    message: "Create your first agent with a steering document to give context to your workflows.",
+    action_label: "+ New Agent",
+    action_path: new_agent_path
+  ) %>
+<% end %>

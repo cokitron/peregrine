@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+# Exit 0 if runner process alive and run dir writable, 1 otherwise.
+
+run_dir = ENV.fetch("KIRO_FLOW_RUN_DIR", "./kiro_flow_runs")
+
+abort "Run directory missing" unless File.directory?(run_dir)
+abort "Run directory not writable" unless File.writable?(run_dir)
+
+latest = Dir.glob(File.join(run_dir, "*/_manifest.txt")).max_by { File.mtime(it) }
+if latest && (Time.now - File.mtime(latest)) > 300
+  abort "Stale: last run #{File.mtime(latest)}"
+end
+
+puts "OK"
+exit 0

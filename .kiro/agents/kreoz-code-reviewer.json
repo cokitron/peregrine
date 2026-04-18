@@ -1,0 +1,20 @@
+{
+  "description": "Kreoz Code Reviewer",
+  "tools": [
+    "fs_read",
+    "fs_write",
+    "execute_bash"
+  ],
+  "allowedTools": [
+    "fs_read",
+    "execute_bash"
+  ],
+  "resources": [
+    "file:///home/jorge/work/flight-control/.kiro/steering/kreoz-code-reviewer.md"
+  ],
+  "toolsSettings": {
+    "execute_bash": {
+      "autoAllowReadonly": true
+    }
+  }
+}

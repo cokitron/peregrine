@@ -1,0 +1,5 @@
+<div class="flex gap-1.5 justify-center" role="progressbar" aria-valuenow="<%= @current %>" aria-valuemin="1" aria-valuemax="<%= @total %>">
+  <% @total.times do |i| %>
+    <div class="progress-dot <%= dot_class(i) %>"></div>
+  <% end %>
+</div>

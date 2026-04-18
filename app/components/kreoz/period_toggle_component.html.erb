@@ -1,0 +1,10 @@
+<nav class="flex gap-2" aria-label="Periodo">
+  <% periods.each do |period| %>
+    <%= link_to period.capitalize,
+      period_path(period),
+      class: "px-3 py-1.5 text-sm font-medium rounded-lg #{tab_class(period)}",
+      data: @turbo_frame ? { turbo_frame: @turbo_frame } : {},
+      aria: { current: active?(period) ? "page" : nil }
+    %>
+  <% end %>
+</nav>

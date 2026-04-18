@@ -1,0 +1,61 @@
+<% content_for(:title) { "#{@agent.nombre} — Agent" } %>
+
+<div data-controller="agent-editor"
+     data-agent-editor-update-url-value="<%= agent_path(@agent, format: :json) %>"
+     data-agent-editor-context-files-value="<%= @agent.context_files.to_json %>">
+
+  <%# Header %>
+  <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <%= link_to agents_path, class: "text-gris hover:text-grafito", aria: { label: "Back to agents" } do %>
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      <% end %>
+      <input type="text" value="<%= @agent.nombre %>" id="agent-nombre"
+             data-agent-editor-target="nombre"
+             data-action="blur->agent-editor#save"
+             aria-label="Agent name"
+             class="text-2xl font-bold bg-transparent border-none focus:outline-none focus:ring-0 text-grafito" />
+    </div>
+    <div class="flex items-center gap-2">
+      <button data-action="click->agent-editor#save" class="btn-primary text-sm">💾 Save</button>
+      <%= button_to "Delete", agent_path(@agent), method: :delete,
+          class: "btn-sm bg-kreoz-red text-white",
+          data: { turbo_confirm: "Delete this agent?" } %>
+    </div>
+  </div>
+
+  <%# Description %>
+  <div class="mb-6">
+    <label for="agent-descripcion" class="block text-xs font-medium text-gris uppercase tracking-wide mb-1">Description</label>
+    <input type="text" value="<%= @agent.descripcion %>" id="agent-descripcion"
+           data-agent-editor-target="descripcion"
+           data-action="blur->agent-editor#save"
+           placeholder="e.g. Ruby on Rails specialist with 20 years of experience"
+           class="w-full border border-borde rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-kreoz-green" />
+  </div>
+
+  <%# Context Files %>
+  <div class="mb-6">
+    <label for="agent-context-files" class="block text-xs font-medium text-gris uppercase tracking-wide mb-1">Context Files</label>
+    <p class="text-xs text-gris mb-2">File paths injected as resources when this agent runs. One per line.</p>
+    <div data-agent-editor-target="contextFiles" class="space-y-2"></div>
+    <button data-action="click->agent-editor#addContextFile"
+            class="mt-2 text-sm text-kreoz-green hover:underline">+ Add file</button>
+  </div>
+
+  <%# Steering Document %>
+  <div>
+    <label for="agent-steering" class="block text-xs font-medium text-gris uppercase tracking-wide mb-1">Steering Document</label>
+    <p class="text-xs text-gris mb-2">This document is injected as context when a Kiro step assigned to this agent runs.</p>
+
+    <%# Markdown Preview %>
+    <div class="mb-4 p-4 border border-borde rounded-lg bg-fondo max-h-64 overflow-y-auto"
+         data-agent-editor-target="preview">
+    </div>
+
+    <textarea data-agent-editor-target="steering" id="agent-steering"
+              data-action="blur->agent-editor#save"
+              rows="20"
+              class="w-full border border-borde rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:border-kreoz-green resize-y"><%= @agent.steering_document %></textarea>
+  </div>
+</div>
