@@ -132,6 +132,7 @@ module KiroFlow
     def enqueue_downstream(node_name, in_degree, ready)
       @workflow.downstream(node_name).each do |dn|
         should_enqueue = @mutex.synchronize do
+          next false unless @state[dn] == :pending
           in_degree[dn] -= 1
           in_degree[dn] <= 0
         end
