@@ -740,8 +740,6 @@ export default class extends Controller {
       banner.classList.add("bg-kreoz-red-light", "text-kreoz-red")
       banner.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-kreoz-red shadow-[0_0_6px_var(--color-kreoz-red)]"></span> Workflow failed${message ? `: ${message}` : ""}`
     }
-    }
-    }
   }
 
   // ══════════════════════════════════════════════════════════
