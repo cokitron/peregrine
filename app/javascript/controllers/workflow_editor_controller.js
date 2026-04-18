@@ -672,7 +672,7 @@ export default class extends Controller {
       const { run_id, status_url } = await resp.json()
       this._pollUrl = status_url
       this._stopUrl = status_url.replace(/\.json$/, "/stop.json")
-      this._pollTimer = setInterval(() => this.pollRunStatus(), 15000)
+      this._pollTimer = setInterval(() => this.pollRunStatus(), 1000)
     } catch (e) {
       this.showRunBanner("failed", e.message)
       if (btn) { btn.disabled = false; btn.textContent = "▶ Run" }
