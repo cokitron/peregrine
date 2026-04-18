@@ -16,6 +16,7 @@ module WorkflowsHelper
     when "completed" then "bg-kreoz-green"
     when "running"   then "bg-blue-500 animate-pulse"
     when "failed"    then "bg-kreoz-red"
+    when "cancelled" then "bg-gray-400"
     else "bg-gray-400"
     end
   end
@@ -25,6 +26,7 @@ module WorkflowsHelper
     when "completed" then "bg-kreoz-green-light text-kreoz-green"
     when "running"   then "bg-blue-50 text-blue-600"
     when "failed"    then "bg-kreoz-red-light text-kreoz-red"
+    when "cancelled" then "bg-gray-100 text-gris"
     else "bg-gray-100 text-gris"
     end
   end

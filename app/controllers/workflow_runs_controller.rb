@@ -1,6 +1,6 @@
 class WorkflowRunsController < ApplicationController
   before_action :set_workflow
-  before_action :set_run, only: :show
+  before_action :set_run, only: %i[show stop]
 
   PER_PAGE = 24
 
@@ -12,6 +12,18 @@ class WorkflowRunsController < ApplicationController
     respond_to do |format|
       format.json { render json: { status: @run.status, node_states: @run.node_states, error_message: @run.error_message } }
       format.html
+    end
+  end
+
+  def stop
+    if @run.status == "running"
+      @run.update!(status: "cancelled")
+      ActionCable.server.broadcast("workflow_run_#{@run.id}", { type: "cancelled", status: "cancelled" })
+    end
+
+    respond_to do |format|
+      format.json { render json: { status: @run.status } }
+      format.html { redirect_to workflow_path(@workflow), notice: "Workflow stopped" }
     end
   end
 

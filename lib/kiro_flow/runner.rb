@@ -10,6 +10,15 @@ module KiroFlow
       @timings = {}
       @errors = {}
       @mutex = Mutex.new
+      @cancelled = false
+    end
+
+    def cancel!
+      @mutex.synchronize { @cancelled = true }
+    end
+
+    def cancelled?
+      @mutex.synchronize { @cancelled }
     end
 
     def run(input: nil, run_dir: nil)
@@ -25,6 +34,8 @@ module KiroFlow
       active_threads = []
 
       until ready.empty? && active_threads.empty?
+        break if cancelled?
+
         # Reap finished threads
         active_threads.reject! { !it.alive? }
 

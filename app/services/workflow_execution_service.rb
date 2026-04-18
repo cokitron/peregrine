@@ -16,12 +16,25 @@ class WorkflowExecutionService
 
     while worker.alive?
       sleep 1
+      if @run.reload.status == "cancelled"
+        runner.cancel!
+        worker.join(5) || worker.kill
+        break
+      end
       @run.update!(node_states: build_node_states(runner, run_dir))
     end
     worker.join
 
+    final_status = if @run.reload.status == "cancelled"
+      "cancelled"
+    elsif runner.success?
+      "completed"
+    else
+      "failed"
+    end
+
     @run.update!(
-      status: runner.success? ? "completed" : "failed",
+      status: final_status,
       node_states: build_node_states(runner, run_dir),
       run_dir: run_dir,
       completed_at: Time.current,

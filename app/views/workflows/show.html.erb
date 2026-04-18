@@ -27,6 +27,7 @@
       <% if @workflow.persisted? %>
         <button data-action="click->workflow-editor#manualSave" class="btn-secondary text-sm">💾 Save</button>
         <button data-action="click->workflow-editor#runWorkflow" class="btn-primary text-sm" data-workflow-editor-target="runBtn">▶ Run</button>
+        <button data-action="click->workflow-editor#stopWorkflow" class="btn-secondary text-sm hidden bg-kreoz-red-light text-kreoz-red hover:bg-kreoz-red hover:text-white" data-workflow-editor-target="stopBtn">⏹ Stop</button>
       <% else %>
         <button data-action="click->workflow-editor#createWorkflow" class="btn-primary text-sm">💾 Save</button>
       <% end %>

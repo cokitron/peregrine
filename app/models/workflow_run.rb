@@ -1,7 +1,7 @@
 class WorkflowRun < ApplicationRecord
   belongs_to :workflow_definition
 
-  validates :status, inclusion: { in: %w[pending running completed failed] }
+  validates :status, inclusion: { in: %w[pending running completed failed cancelled] }
 
   scope :recientes, -> { order(created_at: :desc) }
 

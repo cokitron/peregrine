@@ -11,7 +11,7 @@ const MAX_HISTORY = 30
 const PORT_CLASSES = "w-3 h-3 rounded-full border-2 cursor-crosshair absolute z-30 transition-transform hover:scale-150"
 
 export default class extends Controller {
-  static targets = ["steps", "canvas", "nombre", "defaultAgent", "runBtn", "arrows"]
+  static targets = ["steps", "canvas", "nombre", "defaultAgent", "runBtn", "stopBtn", "arrows"]
   static values  = { updateUrl: String, createUrl: String, persisted: Boolean, steps: Array, agents: Array, workflows: Array, nodeStates: Object, executeUrl: String }
 
   connect() {
@@ -657,7 +657,9 @@ export default class extends Controller {
   async runWorkflow() {
     if (!this.executeUrlValue) return
     const btn = this.hasRunBtnTarget ? this.runBtnTarget : null
+    const stopBtn = this.hasStopBtnTarget ? this.stopBtnTarget : null
     if (btn) { btn.disabled = true; btn.textContent = "⏳ Running…" }
+    if (stopBtn) { stopBtn.classList.remove("hidden") }
     this.nodeStatesValue = {}
     this._runStartedAt = Date.now()
     this.showRunBanner("running")
@@ -667,13 +669,25 @@ export default class extends Controller {
     try {
       const resp = await fetch(this.executeUrlValue, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify({}) })
       if (!resp.ok) throw new Error("Failed to start run")
-      const { status_url } = await resp.json()
+      const { run_id, status_url } = await resp.json()
       this._pollUrl = status_url
+      this._stopUrl = status_url.replace(/\.json$/, "/stop.json")
       this._pollTimer = setInterval(() => this.pollRunStatus(), 15000)
     } catch (e) {
       this.showRunBanner("failed", e.message)
       if (btn) { btn.disabled = false; btn.textContent = "▶ Run" }
+      if (stopBtn) { stopBtn.classList.add("hidden") }
     }
+  }
+
+  async stopWorkflow() {
+    if (!this._stopUrl) return
+    const stopBtn = this.hasStopBtnTarget ? this.stopBtnTarget : null
+    if (stopBtn) { stopBtn.disabled = true; stopBtn.textContent = "⏹ Stopping…" }
+    const csrf = document.querySelector("meta[name='csrf-token']")?.content
+    try {
+      await fetch(this._stopUrl, { method: "POST", headers: { "X-CSRF-Token": csrf } })
+    } catch { /* poll will pick up the status change */ }
   }
 
   async pollRunStatus() {
@@ -684,12 +698,15 @@ export default class extends Controller {
       this.nodeStatesValue = data.node_states || {}
       this.showRunBanner("running") // update elapsed time
       this.render()
-      if (data.status === "completed" || data.status === "failed") {
+      if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
         clearInterval(this._pollTimer)
         this._pollTimer = null
+        this._stopUrl = null
         this.showRunBanner(data.status, data.error_message)
         const btn = this.hasRunBtnTarget ? this.runBtnTarget : null
+        const stopBtn = this.hasStopBtnTarget ? this.stopBtnTarget : null
         if (btn) { btn.disabled = false; btn.textContent = "▶ Run" }
+        if (stopBtn) { stopBtn.classList.add("hidden"); stopBtn.disabled = false; stopBtn.textContent = "⏹ Stop" }
       }
     } catch { /* retry on next tick */ }
   }
@@ -715,9 +732,15 @@ export default class extends Controller {
       banner.classList.add("bg-kreoz-green-light", "text-kreoz-green")
       banner.innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-kreoz-green shadow-[0_0_6px_var(--color-kreoz-green)]"></span> Workflow completed'
       setTimeout(() => banner.remove(), 5000)
+    } else if (status === "cancelled") {
+      banner.classList.add("bg-gray-100", "text-gris")
+      banner.innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-gray-400"></span> Workflow stopped'
+      setTimeout(() => banner.remove(), 5000)
     } else {
       banner.classList.add("bg-kreoz-red-light", "text-kreoz-red")
       banner.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-kreoz-red shadow-[0_0_6px_var(--color-kreoz-red)]"></span> Workflow failed${message ? `: ${message}` : ""}`
+    }
+    }
     }
   }
 
