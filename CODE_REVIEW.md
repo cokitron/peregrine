@@ -1,645 +1,399 @@
-# Flight Control — Kreoz Code Review Report
+# Flight Control — Code Review Report
 
 **Date:** 2026-04-18
-**Reviewer:** Kiro (automated, Kreoz steering v1)
-**Project:** Flight Control — Visual workflow engine for chaining kiro-cli AI calls
-**Stack:** Ruby 3.4.8, Rails 8.1.3, PostgreSQL (UUIDs), Solid Queue/Cache/Cable, Tailwind v4 + Flowbite, Stimulus, ViewComponent, Kamal 2
+**Reviewer:** Kiro (automated, against Kreoz steering document — 21 lenses)
+**Scope:** Full codebase review of the Flight Control visual workflow engine
 
 ---
 
 ## Executive Summary
 
-Flight Control is a well-architected Rails 8 application with a clean KiroFlow engine, solid DSL design, and a polished Stimulus-based visual editor. The lib-level test suite (61 tests, 118 assertions) is thorough.
+Flight Control is a Rails 8.1 application that orchestrates AI agent workflows via a visual editor (Drawflow) backed by a pure-Ruby DAG execution engine (`KiroFlow`). The codebase is young (single-day build) and functional, but has **2 blockers**, **6 critical**, **8 major**, and several minor findings.
 
-However, the application has **4 blockers** and **7 critical** issues that must be addressed before any production deployment. The most severe are: arbitrary code execution via `eval` in DrawflowConverter, complete absence of authentication/authorization, `force_ssl` disabled in production, and zero Rails-level tests.
-
-### Scorecard
-
-| Severity | Count |
-|----------|-------|
-| 🔴 Blocker | 4 |
-| 🟠 Critical | 7 |
-| 🟡 Major | 10 |
-| 🔵 Minor | 8 |
-| ⚪ Nit | 5 |
+The most urgent issue is a **runner infinite loop bug** (reproduced live) caused by missing cycle-termination logic, plus the use of `eval()` on workflow-defined code without sandboxing.
 
 ---
 
-## Lens 1: Security
+## Blocker Findings
 
-### 🔴 BLOCKER — Remote Code Execution via `eval` in DrawflowConverter
+### B1: `eval()` in DrawflowConverter — Remote Code Execution (Lens 1: Security)
 
-**Files:** `app/services/drawflow_converter.rb:30,33`
+**File:** `app/services/drawflow_converter.rb:48-51`
 
 ```ruby
-wf.node(name, type: :ruby, callable: ->(ctx) { eval(code) })   # line 30
-wf.node(name, type: :gate, condition: ->(ctx) { eval(cond) })   # line 33
+wf.node(name, type: :ruby, callable: ->(ctx) { eval(code) })
+# ...
+wf.node(name, type: :conditional, condition: ->(ctx) { eval(cond) })
 ```
 
-User-supplied strings from the `drawflow_data` JSONB column are passed directly to `eval`. Any user who can create or edit a workflow can execute arbitrary Ruby code on the server. This is a textbook RCE vulnerability.
+The `code` and `condition` strings come from `drawflow_data`, which is user-submitted JSON. Even though `sanitize_drawflow_data` allowlists step keys, it does **not** sanitize the *values*. Any user who can create a workflow can execute arbitrary Ruby on the server.
 
-The `# rubocop:disable Security/Eval` comments acknowledge the issue but do not mitigate it.
+The comment at the top of the file acknowledges this but defers to "trusted-user deployments." Since there is **no authentication** (see B2), every user is untrusted.
 
-**Fix:** For Ruby nodes, use a sandboxed evaluator or restrict to a safe DSL. For gate conditions, parse a limited expression grammar (e.g., `ctx[:name].include?("success")`) instead of eval. At minimum, document this as an intentional design decision for trusted-user-only deployments and add a prominent warning.
+**Fix:** Replace `eval` with a safe expression evaluator (e.g., a simple DSL that only allows context lookups and comparisons), or at minimum gate workflow creation behind authentication + authorization.
 
-### 🔴 BLOCKER — No Authentication
+---
 
-**File:** `app/controllers/application_controller.rb`
+### B2: No Authentication or Authorization (Lens 1: Security)
+
+There is no authentication system. No login, no `has_secure_password`, no session management. Every route is publicly accessible. Combined with B1, this means anyone with network access can execute arbitrary code.
+
+- `ApplicationController` has no `before_action` for auth.
+- No Pundit policies exist anywhere.
+- `WorkflowRunChannel` streams to anyone who knows a run ID — no subscription auth.
+
+**Fix:** Add authentication before any other work. Even a simple `has_secure_password` + session-based login would close the most critical attack surface.
+
+---
+
+## Critical Findings
+
+### C1: Runner Infinite Loop on Cyclic Workflows (Lens 4: Performance / Lens 6: Anti-Patterns)
+
+**Reproduced on workflow `39e3187d-...`**
+
+**Root cause:** The runner's `enqueue_downstream` method re-enqueues already-processed nodes without any guard:
 
 ```ruby
-class ApplicationController < ActionController::Base
-  allow_browser versions: :modern
-  stale_when_importmap_changes
-  layout "authenticated"
+# lib/kiro_flow/runner.rb — enqueue_downstream
+@workflow.downstream(node_name).each do |dn|
+  should_enqueue = @mutex.synchronize do
+    in_degree[dn] -= 1
+    in_degree[dn] <= 0
+  end
+  ready << dn if should_enqueue
 end
 ```
 
-There is no `before_action :authenticate`, no session management, no login flow. Every route is publicly accessible. The layout is named "authenticated" but enforces nothing.
+When a cycle exists (gate `on_true` → upstream node → gate), and a node in the cycle is skipped (because an earlier node failed), both nodes in the cycle keep re-enqueuing each other as `:skipped` infinitely. The `in_degree` counter goes negative with no floor, and `<= 0` is always true.
 
-`ApplicationCable::Connection` references `Session` and `cookies.signed[:session_id]` — models that don't exist in this project, so WebSocket connections will always be rejected.
+**What happened in the live run:**
+1. `shell_6` ✓ → `Code Review` ✓ → `Tend Concerns` ✗ (failed)
+2. `Validate Changes` skipped (upstream failed)
+3. `Needs more Attention?` skipped (upstream skipped)
+4. Gate's `on_true` edge re-enqueues `Validate Changes` → skips → re-enqueues gate → skips → ∞
 
-**Fix:** Add authentication. Rails 8's `bin/rails generate authentication` provides a solid starting point.
-
-### 🔴 BLOCKER — No Authorization
-
-No Pundit, no CanCanCan, no policy checks anywhere. Every authenticated user (once auth exists) would have full access to all workflows, agents, and runs.
-
-**Fix:** Add Pundit policies or at minimum scope queries to the current user.
-
-### 🔴 BLOCKER — `force_ssl` Disabled in Production
-
-**File:** `config/environments/production.rb:28-29`
+**Fix:** Add a processed-node guard in `enqueue_downstream`:
 
 ```ruby
-# config.assume_ssl = true
-# config.force_ssl = true
-```
-
-Both are commented out. Production traffic will be served over plain HTTP. Session cookies, CSRF tokens, and all data transmitted in cleartext.
-
-**Fix:** Uncomment both lines. Add the health check exclusion for the `/up` endpoint.
-
-### 🟠 CRITICAL — Shell Command Injection via ShellNode
-
-**File:** `lib/kiro_flow/nodes/shell_node.rb:7`
-
-```ruby
-cmd = context.interpolate(opts.fetch(:command))
-stdout, stderr, status = Timeout.timeout(opts.fetch(:timeout, 60)) { Open3.capture3(cmd) }
-```
-
-`Open3.capture3(cmd)` with a single string argument passes through the shell. If `{{name}}` interpolation injects user-controlled content, it enables command injection. The KiroNode has the same pattern with `IO.popen(cmd)`.
-
-**Fix:** Use the array form of `Open3.capture3` to avoid shell interpretation, or validate/escape interpolated values.
-
-### 🟠 CRITICAL — `permit!` on Nested Params
-
-**File:** `app/controllers/workflows_controller.rb:24,67`
-
-```ruby
-@workflow.drawflow_data = params.dig(:workflow_definition, :drawflow_data)&.permit!&.to_h
-```
-
-`.permit!` allows any parameter through, bypassing strong parameters entirely. An attacker could inject arbitrary keys into the JSONB column.
-
-**Fix:** Define an explicit permit list for the drawflow_data structure, or validate the JSON schema server-side before saving.
-
-### 🟠 CRITICAL — CSP Entirely Disabled
-
-**File:** `config/initializers/content_security_policy.rb`
-
-The entire CSP configuration is commented out. No Content-Security-Policy header is sent. This leaves the app vulnerable to XSS via injected scripts.
-
-**Fix:** Enable CSP with at minimum `default_src :self`, allowing the Flowbite CDN and Google Fonts explicitly.
-
-### 🟡 MAJOR — No Rate Limiting
-
-No `rack-attack` gem, no throttling on any endpoint. The `execute` action queues background jobs — an attacker could flood the job queue.
-
-**Fix:** Add `rack-attack` with throttles on workflow execution and any future auth endpoints.
-
-### 🟡 MAJOR — WebSocket Channel Has No Authorization
-
-**File:** `app/channels/workflow_run_channel.rb`
-
-```ruby
-class WorkflowRunChannel < ApplicationCable::Channel
-  def subscribed
-    stream_from "workflow_run_#{params[:run_id]}"
+def enqueue_downstream(node_name, in_degree, ready)
+  @workflow.downstream(node_name).each do |dn|
+    should_enqueue = @mutex.synchronize do
+      next false unless @state[dn] == :pending  # ← guard
+      in_degree[dn] -= 1
+      in_degree[dn] <= 0
+    end
+    ready << dn if should_enqueue
   end
 end
 ```
 
-Any client can subscribe to any run's channel by guessing/enumerating UUIDs. No ownership check.
-
-**Fix:** Verify the current user owns the workflow run before allowing subscription.
-
-### 🔵 MINOR — `--trust-all-tools` Default in KiroNode
-
-KiroNode defaults to `trust: :all`, which gives kiro-cli unrestricted tool access. This is by design for the workflow engine but should be documented as a security consideration.
-
-### 🔵 MINOR — Filter Parameters Comprehensive ✅
-
-`config/filter_parameters` includes `:passw, :email, :secret, :token, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc`. Good coverage.
-
 ---
 
-## Lens 2: Multi-Tenancy
+### C2: Gate Nodes Don't Wire `only_if` Guards via DrawflowConverter (Lens 6: Anti-Patterns)
 
-**N/A** — Flight Control is a single-tenant application. No `acts_as_tenant`, no `empresa_id` columns. This is appropriate for a personal/team tool. If multi-tenancy is added later, every model will need tenant scoping.
+**File:** `app/services/drawflow_converter.rb:56-58`
 
----
+The `ChainBuilder` DSL correctly sets `only_if: gate_name` on nodes downstream of a gate. But `DrawflowConverter` does not — it creates the edge but never sets the guard. This means the gate's `"true"`/`"false"` output is stored in context but **never consulted**. Both `on_true` and `on_false` targets execute unconditionally.
 
-## Lens 3: Database & Data Integrity
-
-### ✅ UUIDs and pgcrypto
-
-All tables use `id: :uuid`. `pgcrypto` extension enabled. Generator configured in `config/application.rb`.
-
-### 🟡 MAJOR — Missing Foreign Key on `default_agent_id`
-
-**File:** `db/migrate/20260418175825_create_agents.rb:9`
+**Fix:** When wiring gate edges, set `only_if` on the `on_true` target and `unless_node` on the `on_false` target:
 
 ```ruby
-add_column :workflow_definitions, :default_agent_id, :uuid
-```
-
-No `foreign_key: true`, no index. Orphaned references possible if an agent is deleted.
-
-**Fix:**
-```ruby
-add_reference :workflow_definitions, :default_agent, type: :uuid, foreign_key: { to_table: :agents }, index: true
-```
-
-### 🟡 MAJOR — No CHECK Constraint on `workflow_runs.status`
-
-The model validates `inclusion: { in: %w[pending running completed failed] }`, but there's no DB-level CHECK constraint. Direct SQL or `update_column` (used in the job) bypasses model validations.
-
-**Fix:** Add a migration with `CHECK (status IN ('pending', 'running', 'completed', 'failed'))`.
-
-### 🟡 MAJOR — `update_column` Bypasses Validations
-
-**File:** `app/jobs/execute_workflow_job.rb:14`
-
-```ruby
-run.update_column(:node_states, build_node_states(runner, run_dir))
-```
-
-`update_column` skips validations and callbacks. Combined with the missing CHECK constraint, this could write invalid data.
-
-**Fix:** Use `update!` or add the DB-level CHECK constraint.
-
-### 🔵 MINOR — Timestamps Missing `null: false`
-
-The `agents` and `workflow_definitions` tables have timestamps but the schema shows them as nullable (Rails 8 default may handle this, but explicit `null: false` is safer).
-
----
-
-## Lens 4: Performance
-
-### 🟠 CRITICAL — N+1 Queries in `workflows#index`
-
-**File:** `app/controllers/workflows_controller.rb:6`
-
-```ruby
-@workflows = WorkflowDefinition.includes(:workflow_runs).order(updated_at: :desc)
-```
-
-The `includes(:workflow_runs)` loads all runs, but the view then calls:
-- `wf.workflow_runs.recientes.limit(5)` — triggers a new query per workflow (the scope/limit defeats the eager load)
-- `wf.last_run` — another query per workflow
-
-**Fix:** Use a window function or preload the latest 5 runs per workflow. Or accept the N+1 for now and add `strict_loading` in development to catch regressions.
-
-### 🟡 MAJOR — No Pagination on Any Index Action
-
-All three index actions (`workflows#index`, `workflow_runs#index`, `agents#index`) load unbounded collections. As data grows, these will degrade.
-
-**Fix:** Add pagination (Pagy or cursor-based) to all index actions.
-
-### 🟡 MAJOR — Polling Loop in ExecuteWorkflowJob
-
-**File:** `app/jobs/execute_workflow_job.rb:11-15`
-
-```ruby
-while worker.alive?
-  sleep 1
-  run.update_column(:node_states, build_node_states(runner, run_dir))
+if s["type"] == "gate"
+  if s["on_true"].present?
+    wf.connect(name >> s["on_true"].to_sym)
+    wf.nodes[s["on_true"].to_sym]&.opts&.[]=(:only_if, name)
+  end
+  if s["on_false"].present?
+    wf.connect(name >> s["on_false"].to_sym)
+    wf.nodes[s["on_false"].to_sym]&.opts&.[]=(:unless_node, name)  
+  end
 end
 ```
 
-This spawns a thread inside a Solid Queue job, then polls every second with a DB write. This ties up a job worker thread and hammers the database.
+---
 
-**Fix:** Use `after_commit` callbacks or ActionCable broadcasts from the runner itself instead of polling. Or at minimum increase the poll interval.
+### C3: Gate Condition Hardcoded to `"true"` (Lens 6: Anti-Patterns)
 
-### 🔵 MINOR — Client-Side Polling at 15s Intervals
+The workflow's gate node `Needs more Attention?` has `"condition": "true"` — a hardcoded string that always evaluates to true via `eval("true")`. The user's intent was for the gate to evaluate based on the output of `Validate Changes`, but there's no mechanism to do that.
 
-The workflow editor polls run status every 15 seconds via `setInterval`. Consider using ActionCable (already set up) for real-time updates instead.
+The gate condition should reference the previous node's output, e.g.:
+```
+ctx[:"Validate Changes"].include?("needs more")
+```
+
+But the UI doesn't provide a way to write context-aware conditions. The condition field is a free-text `eval` target with no guidance.
+
+**Fix:** Either provide a structured condition builder in the UI (e.g., "if output of [node] contains [text]"), or document the `ctx[:node_name]` API for gate conditions.
 
 ---
 
-## Lens 5: Code Quality & Ruby Style
+### C4: No Model or Controller Tests (Lens 7: Testing)
 
-### 🟡 MAJOR — `workflow_editor_controller.js` is 500+ Lines
+- `test/models/` — empty
+- `test/controllers/` — empty
+- `test/system/` — empty
 
-This Stimulus controller handles rendering, linking, drag-and-drop, undo/redo, keyboard shortcuts, SVG arrows, run execution, and polling. It should be decomposed into smaller controllers.
+Only `spec/kiro_flow_spec.rb` exists (61 tests for the lib engine). Zero tests for Rails models, controllers, services, jobs, or channels.
 
-**Fix:** Extract into focused controllers: `workflow-renderer`, `workflow-linker`, `workflow-runner`, `workflow-undo`.
-
-### 🔵 MINOR — `arrowsTarget` Referenced but Not Declared
-
-**File:** `app/javascript/controllers/workflow_editor_controller.js`
-
-The controller references `this.arrowsTarget` in `startLinking`, `onLinkMouseMove`, `onLinkMouseUp`, and `drawArrows`, but `arrowsTarget` is not in the `static targets` list and no element with `data-workflow-editor-target="arrows"` exists in the view. This will cause runtime errors when linking is attempted.
-
-**Fix:** Add `"arrows"` to `static targets` and add an SVG element with the target attribute in the view.
-
-### 🔵 MINOR — Constants Not Frozen in Some Places
-
-`NODE_TYPES` in the JS controller is `const` (fine). In Ruby, `WorkflowsHelper::NODE_STYLES` is properly frozen. `Agent` model constants are fine. No issues found.
-
-### ⚪ NIT — Inconsistent Language
-
-The steering doc specifies "Spanish domain, English infrastructure." This project uses English throughout (model names, routes, views). The only Spanish is `nombre` and `descripcion` on models. This is fine for Flight Control but inconsistent with the Kreoz convention.
-
----
-
-## Lens 6: Rails Anti-Patterns
-
-### 🟠 CRITICAL — GET Action Creates a Record
-
-**File:** `app/controllers/agents_controller.rb:8-10`
-
-```ruby
-def new
-  @agent = Agent.create!(nombre: "New Agent #{Time.current.strftime('%H:%M')}", steering_document: default_steering)
-  redirect_to agent_path(@agent)
-end
-```
-
-The `new` action (GET request) creates a database record. This violates HTTP semantics — GET requests must be safe (no side effects). Browser prefetching, crawlers, or accidental navigation will create orphan agents.
-
-**Fix:** Use a POST action for creation. The `new` action should only render a form.
-
-### 🟡 MAJOR — Business Logic in Job
-
-`ExecuteWorkflowJob` contains workflow conversion, runner orchestration, thread management, state polling, and broadcasting. This should be extracted into a service object.
-
-### ⚪ NIT — `default_steering` Method in Controller
-
-The `default_steering` method in `AgentsController` contains a heredoc template. This belongs in the model or a constant.
-
----
-
-## Lens 7: Testing
-
-### 🟠 CRITICAL — Zero Rails-Level Tests
-
-```
-test/models/       → empty
-test/controllers/  → empty
-test/system/       → empty
-test/fixtures/     → no fixture files
-```
-
-The only tests are in `spec/kiro_flow_spec.rb` (61 tests for the lib-level engine). There are no tests for:
+**Minimum required:**
 - Model validations and associations
-- Controller actions and response codes
-- Service objects (DrawflowConverter)
-- Background jobs (ExecuteWorkflowJob)
-- System/integration tests
-- ViewComponent rendering
-
-The CI pipeline runs `bin/rails test` and `bin/rails test:system` but both will pass vacuously with zero tests.
-
-**Fix:** Add at minimum:
-1. Model tests for all 3 models (validations, associations, scopes)
-2. Controller tests for CRUD operations and authorization
-3. DrawflowConverter unit tests
-4. ExecuteWorkflowJob tests
-5. Fixtures for all models
-
-### 🔵 MINOR — Spec File Uses Minitest, Not in Standard Location
-
-`spec/kiro_flow_spec.rb` uses Minitest but lives in `spec/` (RSpec convention). It also requires files manually instead of using Rails test infrastructure. This is fine for a standalone lib but should be noted.
+- `WorkflowsController` CRUD + execute action
+- `DrawflowConverter` edge cases (cycles, missing nodes, malformed data)
+- `WorkflowExecutionService` happy path + failure handling
+- `ExecuteWorkflowJob` error recovery
 
 ---
 
-## Lens 8: Hotwire (Turbo + Stimulus)
+### C5: WorkflowRun Stuck in `running` Status After Crash (Lens 10: Error Handling)
 
-### 🟡 MAJOR — Missing `arrowsTarget` SVG Element
+The workflow run `39e3187d-...` is still `status: "running"` because the Puma process was killed with Ctrl+C. There is no mechanism to detect and recover stale running jobs.
 
-The workflow editor controller references `this.arrowsTarget` extensively for SVG arrow drawing, but no corresponding SVG element exists in `workflows/show.html.erb` and `"arrows"` is not in the `static targets` declaration. The entire visual linking feature is broken.
-
-**Fix:** Add to `static targets`: `"arrows"`. Add to the view:
-```erb
-<svg data-workflow-editor-target="arrows" class="absolute inset-0 pointer-events-none overflow-visible"></svg>
-```
-
-### ✅ CSRF Tokens Handled Correctly
-
-All fetch calls in Stimulus controllers read the CSRF token from the meta tag and include it in headers. Good.
-
-### ✅ Progressive Enhancement
-
-The editor degrades to server-rendered HTML. Links work without JS. Turbo Drive provides the free upgrade.
-
----
-
-## Lens 9: ViewComponent
-
-### ✅ Namespace and Structure
-
-All 17 components live under `Kreoz::` namespace in `app/components/kreoz/`. They use keyword arguments and variant hashes.
-
-### 🟡 MAJOR — No Component Tests
-
-Zero ViewComponent tests exist. Every component should have a `render_inline` test covering all variants.
-
-### ⚪ NIT — Some Components Are Minimal
-
-`DrawerComponent`, `FabComponent`, and `ModalComponent` have very thin Ruby files (1-3 lines). Consider if they add value over plain partials.
-
----
-
-## Lens 10: Error Handling & Logging
-
-### 🟡 MAJOR — No `rescue_from` in ApplicationController
-
-No global error handling. `ActiveRecord::RecordNotFound` will render a raw 500 error in production (since `consider_all_requests_local = false`).
-
-**Fix:** Add:
-```ruby
-rescue_from ActiveRecord::RecordNotFound, with: :not_found
-
-private
-def not_found
-  render file: Rails.public_path.join("404.html"), status: :not_found, layout: false
-end
-```
-
-### 🔵 MINOR — Broad Rescue in ExecuteWorkflowJob
+**Fix:** Add a startup task or periodic job that marks stale `running` runs as `failed`:
 
 ```ruby
-rescue => e
-  run&.update!(status: "failed", error_message: e.message, completed_at: Time.current)
-  raise
-end
+WorkflowRun.where(status: "running")
+           .where("updated_at < ?", 10.minutes.ago)
+           .update_all(status: "failed", error_message: "Stale run recovered")
 ```
 
-Rescuing `StandardError` is acceptable here since it re-raises. The job will be retried by Solid Queue. Good pattern.
+---
+
+### C6: CSRF Protection Not Explicitly Verified (Lens 1: Security)
+
+`ApplicationController` inherits from `ActionController::Base` which includes CSRF protection by default in Rails 8. The layout includes `<%= csrf_meta_tags %>`. However:
+
+- No explicit `protect_from_forgery` declaration.
+- The `update` actions return `head :ok` for JSON — verify Turbo includes CSRF tokens on these requests.
+- `WorkflowRunChannel` has no CSRF or auth verification on subscription.
+
+**Severity:** Critical only because there's no auth at all (B2). Once auth is added, verify CSRF is enforced on all state-changing actions.
 
 ---
 
-## Lens 11: Internationalization
+## Major Findings
 
-### 🔵 MINOR — All Strings Hardcoded in English
-
-All user-facing text is hardcoded in views and controllers. No I18n keys used. The Kreoz convention calls for Spanish domain text via locale files, but Flight Control appears to be an English-only project. This is acceptable if intentional.
-
-### 🔵 MINOR — `raise_on_missing_translations` Disabled
-
-Both `development.rb` and `test.rb` have `config.i18n.raise_on_missing_translations` commented out.
-
----
-
-## Lens 12: Accessibility
-
-### 🟡 MAJOR — Form Inputs Lack Labels
-
-Throughout the views, inputs are used without associated `<label>` elements:
-
-- `workflows/show.html.erb`: The nombre input has no label
-- `agents/show.html.erb`: nombre, descripcion, steering inputs have visible labels but no `for` attribute linking them to the inputs (they use `<label class="block...">` without `for`)
-- All JS-generated inputs in the workflow editor have no labels or `aria-label`
-
-**Fix:** Add `for` attributes to labels matching input `id`s, or use `aria-label` on inputs.
-
-### 🟡 MAJOR — Icon-Only Buttons Lack Accessible Names
-
-Multiple buttons use only SVG icons with no text or `aria-label`:
-- Back navigation buttons (arrow SVGs)
-- Delete buttons (X SVGs)
-- The `⋮` actions button in workflow cards
-
-**Fix:** Add `aria-label` to all icon-only buttons.
-
-### 🔵 MINOR — No Skip Navigation Link
-
-No skip-to-content link for keyboard users to bypass the sidebar.
-
-### 🔵 MINOR — No `aria-live` Regions for Dynamic Updates
-
-Turbo Stream updates and toast notifications have no `aria-live` attributes. Screen readers won't announce changes.
-
----
-
-## Lens 13: Concurrency & Thread Safety
-
-### ✅ Mutex Usage in Runner and Context
-
-`KiroFlow::Runner` uses `@mutex` for all shared state access. `KiroFlow::Context` uses `@mutex` for the store. Thread-safe.
-
-### 🟡 MAJOR — Thread Spawned Inside Background Job
-
-**File:** `app/jobs/execute_workflow_job.rb:10-15`
+### M1: N+1 Query in WorkflowsController#index (Lens 4: Performance)
 
 ```ruby
-worker = Thread.new { ctx = runner.run(input: run.input_text, run_dir: run_dir) }
+# app/views/workflows/index.html.erb calls @workflow.last_run for each card
+def last_run = workflow_runs.order(created_at: :desc).first
+```
+
+Each workflow card triggers a separate query for `last_run`. With 24 workflows per page, that's 25 queries.
+
+**Fix:** `@workflows = WorkflowDefinition.includes(:workflow_runs).order(...)` or preload only the latest run with a subquery.
+
+---
+
+### M2: `Agent#materialize!` Writes to Filesystem from Model (Lens 6: Anti-Patterns)
+
+**File:** `app/models/agent.rb:5-20`
+
+The `materialize!` method writes files to `.kiro/agents/` and `.kiro/steering/`. This is a side effect in a model — it should be a service object. It also runs during `DrawflowConverter.resolve_agent`, meaning every workflow execution triggers filesystem writes.
+
+---
+
+### M3: Missing `dependent:` on Agent Association (Lens 3: Data Integrity)
+
+```ruby
+# app/models/agent.rb
+has_many :workflow_definitions, foreign_key: :default_agent_id
+```
+
+No `dependent:` declaration. The DB has `on_delete: :nullify` which is correct, but the model should declare `dependent: :nullify` to match and make the behavior explicit in Ruby.
+
+---
+
+### M4: Unbounded Collection in WorkflowsController#show (Lens 4: Performance)
+
+```ruby
+@workflows = WorkflowDefinition.where.not(id: @workflow.id).where(is_active: true).order(:nombre)
+```
+
+No `.limit()`. If there are thousands of workflows, this loads them all for the sub-workflow dropdown.
+
+---
+
+### M5: No I18n — Hardcoded English Strings (Lens 11: I18n)
+
+All user-facing text is hardcoded in views and controllers:
+- `"Workflow created"`, `"Workflow deleted"`, `"Agent deleted"`
+- `"New Workflow"`, `"New Agent #{Time.current.strftime('%H:%M')}"`
+- Button labels, headings, empty states — all inline English
+
+The steering doc requires Spanish domain with I18n locale files. Currently there's only a default `config/locales/en.yml` with no custom keys.
+
+---
+
+### M6: Missing Database Indexes (Lens 3: Database)
+
+- `workflow_runs.status` — no index. Querying by status (e.g., finding stale `running` runs) will seq-scan.
+- `agents` table — no indexes beyond PK. If agent count grows, `Agent.order(:nombre)` and `Agent.find_by(id:)` are fine on PK but `order(:nombre)` has no index.
+- `workflow_runs.created_at` — used in `scope :recientes` ordering, no index.
+
+---
+
+### M7: `to_unsafe_h` in WorkflowsController (Lens 1: Security)
+
+```ruby
+# app/controllers/workflows_controller.rb
+data = raw.is_a?(ActionController::Parameters) ? raw.to_unsafe_h : raw
+```
+
+`to_unsafe_h` bypasses strong parameters. The subsequent `slice(*ALLOWED_STEP_KEYS)` mitigates this for top-level keys, but nested values within each step are not sanitized. Combined with `eval()` (B1), this is part of the attack chain.
+
+---
+
+### M8: CSP in Report-Only Mode (Lens 1: Security)
+
+```ruby
+config.content_security_policy_report_only = true
+```
+
+CSP is configured but not enforced. `script_src` allows `cdn.jsdelivr.net` which is fine for Flowbite, but report-only mode means XSS payloads would still execute.
+
+**Fix:** Switch to enforcing mode once the app is stable.
+
+---
+
+## Minor Findings
+
+### m1: Unfrozen Constants (Lens 13: Concurrency)
+
+```ruby
+# app/controllers/workflows_controller.rb
+ALLOWED_STEP_KEYS = %w[...].freeze  # ✓ frozen
+
+# app/helpers/workflows_helper.rb
+NODE_STYLES = { ... }.freeze  # ✓ frozen, but inner hashes are NOT frozen
+```
+
+The inner hashes in `NODE_STYLES` (`{ icon: "⚡", bg: "..." }`) are mutable. Under Puma's threaded model, a thread could theoretically mutate them.
+
+**Fix:** `NODE_STYLES = { ... }.transform_values(&:freeze).freeze`
+
+---
+
+### m2: `password_validation_controller.js` Exists Without Auth (Lens 15: Assets)
+
+A Stimulus controller for password validation exists but there's no authentication system. Dead code.
+
+---
+
+### m3: `hello_controller.js` — Rails Scaffold Leftover (Lens 15: Assets)
+
+Default Rails scaffold file. Should be removed.
+
+---
+
+### m4: `run_dir` Stored as String Path (Lens 3: Data Integrity)
+
+`WorkflowRun.run_dir` stores an absolute filesystem path like `~/.kiro_flow/runs/20260418_...`. This is fragile — if the home directory or server changes, paths break. Consider storing only the run ID and computing the path.
+
+---
+
+### m5: `WorkflowExecutionService` Holds DB Connection During Polling Loop (Lens 13: Concurrency)
+
+```ruby
 while worker.alive?
   sleep 1
-  run.update_column(:node_states, build_node_states(runner, run_dir))
+  @run.update!(node_states: build_node_states(runner, run_dir))
 end
 ```
 
-Spawning threads inside Solid Queue jobs is risky. If the job is killed (timeout, deploy), the thread may be orphaned. The `ctx` variable is assigned inside the thread but read outside — this is a race condition (though `worker.join` mitigates it).
-
-**Fix:** Run the workflow synchronously in the job and use ActionCable broadcasts from the runner for live updates.
+The main thread holds an ActiveRecord connection for the entire workflow duration (potentially minutes). With a pool of 5 and 3 Solid Queue threads, this could exhaust connections.
 
 ---
 
-## Lens 14: Dependency Management
+### m6: No `config.filter_parameters` Customization (Lens 1: Security)
 
-### 🟠 CRITICAL — Dockerfile Ruby Version Mismatch
+Rails defaults filter `:password`, but the app should also filter `:token`, `:secret`, `:_key`, `:steering_document` (may contain sensitive instructions).
 
-**File:** `Dockerfile:10`
+---
 
-```dockerfile
-ARG RUBY_VERSION=3.2.2
+### m7: Kamal Deploy Target is `192.168.0.1` (Lens 16: Deployment)
+
+`config/deploy.yml` points to a private IP. This is fine for local/dev but should be parameterized for production.
+
+---
+
+### m8: `action_mailer.default_url_options` Set to `example.com` (Lens 20: Configuration)
+
+```ruby
+config.action_mailer.default_url_options = { host: "example.com" }
 ```
 
-`.ruby-version` specifies `3.4.8`. The Docker image will build with Ruby 3.2.2, missing all Ruby 3.4 features the codebase relies on (e.g., `it` block parameter).
-
-**Fix:** Change to `ARG RUBY_VERSION=3.4.8`.
-
-### ✅ Gem Versions Properly Constrained
-
-Gemfile uses pessimistic constraints (`~>`) for key gems. Flowbite CDN pinned to `4.0.1`.
-
-### ⚪ NIT — No `rack-attack` in Gemfile
-
-As noted in Security, rate limiting gem is missing.
+Placeholder value in production config. If mailer is ever used, links will point to example.com.
 
 ---
 
-## Lens 15: Asset Pipeline & Frontend
+## Lens-by-Lens Summary
 
-### ✅ Propshaft + Importmap Properly Configured
-
-Assets use Propshaft with content-based fingerprinting. JS dependencies pinned in `config/importmap.rb` with exact versions.
-
-### ✅ Tailwind CSS + Flowbite Integration
-
-`app/assets/tailwind/application.css` properly imports Flowbite theme and defines custom brand colors.
-
-### ⚪ NIT — Dynamic Tailwind Classes Safelisted
-
-The view includes a hidden div with safelisted dynamic classes. This is a valid workaround but should be documented.
-
----
-
-## Lens 16: Deployment & Infrastructure
-
-### 🔴 (Already counted above) — `force_ssl` Disabled
-
-### 🟡 MAJOR — Dockerfile Ruby Version Mismatch (counted in Lens 14)
-
-### ✅ Kamal 2 Configuration
-
-`config/deploy.yml` is properly configured with Kamal 2, Thruster, and Solid Queue in Puma.
-
-### ✅ CI Pipeline
-
-`.github/workflows/ci.yml` covers: Brakeman, bundler-audit, importmap audit, RuboCop, Rails tests, and system tests. Well-structured.
-
-### ✅ Health Check Endpoint
-
-`/up` route mapped to `rails/health#show`. Custom `bin/healthcheck` for KiroFlow runner.
+| # | Lens | Verdict | Key Findings |
+|---|------|---------|-------------|
+| 1 | Security | 🔴 FAIL | `eval()` RCE (B1), no auth (B2), `to_unsafe_h` (M7), CSP report-only (M8) |
+| 2 | Multi-Tenancy | ⚪ N/A | Single-tenant app, no ActsAsTenant needed yet |
+| 3 | Database & Data Integrity | 🟡 WARN | Missing indexes (M6), missing `dependent:` (M3), `run_dir` as string (m4) |
+| 4 | Performance | 🟡 WARN | N+1 on index (M1), unbounded collection (M4), connection hold (m5) |
+| 5 | Code Quality & Ruby Style | 🟢 PASS | Clean code, good use of Ruby 3.4 features (`it`, endless methods), RuboCop configured |
+| 6 | Rails Anti-Patterns | 🟡 WARN | `materialize!` side effect in model (M2), gate wiring bug (C2) |
+| 7 | Testing | 🔴 FAIL | Zero Rails tests (C4). Only lib specs exist. |
+| 8 | Hotwire | 🟢 PASS | Turbo Streams for live updates, Stimulus controllers well-structured, ActionCable for real-time |
+| 9 | ViewComponent | 🟢 PASS | 16 components under `Kreoz::` namespace, variant-driven, slot-based. No component tests though. |
+| 10 | Error Handling | 🟡 WARN | Stale run recovery missing (C5), `rescue => e` in job re-raises (good) |
+| 11 | I18n | 🔴 FAIL | All strings hardcoded in English (M5), no locale files |
+| 12 | Accessibility | 🟡 WARN | Not audited in detail — Flowbite components provide baseline a11y, but custom views need review |
+| 13 | Concurrency | 🟢 PASS | Runner uses Mutex correctly, Context is thread-safe, minor constant freezing issue (m1) |
+| 14 | Dependency Management | 🟢 PASS | Gems pinned with `~>`, Flowbite CDN pinned to exact version, `bundler-audit` + `brakeman` in Gemfile |
+| 15 | Asset Pipeline | 🟢 PASS | Propshaft + Importmap configured correctly, dead JS files (m2, m3) |
+| 16 | Deployment | 🟢 PASS | Kamal 2 configured, Dockerfile is solid (jemalloc, multi-stage, non-root), `force_ssl = true` |
+| 17 | Scalability | 🟡 WARN | `workflow_runs` will grow unbounded — no archival/cleanup strategy |
+| 18 | API Design | 🟢 PASS | RESTful routes, correct status codes, `respond_to` handles HTML + JSON |
+| 19 | Soft Deletes | ⚪ N/A | No soft deletes implemented (hard deletes via `destroy`) |
+| 20 | Configuration | 🟢 PASS | Production config is solid, `.env.example` exists, secrets in credentials |
+| 21 | Git & PR Hygiene | 🟡 WARN | Entire project in one commit (216 files). Should be broken into logical commits. |
 
 ---
 
-## Lens 17: Scalability
+## Infinite Loop Post-Mortem
 
-### 🟡 MAJOR — No Pagination (counted in Lens 4)
+**Workflow:** `39e3187d-6953-487c-91f3-c664da5a7724` ("New Workflow")
+**Run status:** Stuck in `running` (process killed with Ctrl+C)
 
-### 🔵 MINOR — `workflow_runs` Table Will Grow Unbounded
-
-No archival or cleanup strategy for old runs. The `run_dir` on disk (`~/.kiro_flow/runs/`) will also accumulate indefinitely.
-
-**Fix:** Add a periodic cleanup job or retention policy.
-
----
-
-## Lens 18: API Design
-
-### ✅ RESTful Routes
-
-Routes follow REST conventions. Nested resources one level deep. `execute` is a member POST action.
-
-### ✅ Proper Status Codes
-
-JSON responses use correct status codes: 201 for create, 422 for validation errors, 200 for success.
-
-### ⚪ NIT — `execute` Action Returns Different Formats
-
-The `execute` action responds to both JSON and HTML. The JSON response returns `{ run_id, status_url }` which is clean. The HTML response redirects. Good dual-format handling.
-
----
-
-## Lens 19: Soft Deletes & Data Lifecycle
-
-### Not Implemented
-
-No soft deletes. All deletions are hard deletes via `destroy`. This is acceptable for an early-stage project but should be considered before production use, especially for workflow runs (audit trail).
-
-### ✅ `dependent: :destroy` Set
-
-`WorkflowDefinition has_many :workflow_runs, dependent: :destroy` — cascading deletes are explicit.
-
----
-
-## Lens 20: Configuration & Environment Hygiene
-
-### ✅ Secrets Management
-
-- `.env*` in `.gitignore`
-- `config/*.key` in `.gitignore`
-- `config/master.key` exists but is gitignored
-- `.kamal/secrets` reads master key from file, not hardcoded
-
-### ✅ Filter Parameters
-
-Comprehensive list including `:passw, :email, :secret, :token, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc`.
-
-### 🔵 MINOR — No `.env.example` File
-
-No documentation of required environment variables.
-
----
-
-## Lens 21: Git & PR Hygiene
-
-### ✅ `.gitignore` Comprehensive
-
-Covers logs, tmp, storage, node_modules, builds, keys, env files.
-
-### ✅ CI Pipeline Complete
-
-Brakeman, bundler-audit, RuboCop, tests, system tests all in CI.
-
-### 🔵 MINOR — Junk File in Project Root
-
+### Workflow Structure
 ```
-/home/jorge/work/flight-control/[0m[0m[0m
+shell_6 → Code Review → Tend Concerns → Validate Changes → Needs more Attention?
+                                                ↑                    │
+                                                └────── on_true ─────┘
 ```
 
-A file with ANSI escape codes as its name exists in the project root. Should be deleted before committing.
+### Timeline
+1. `shell_6` completed (empty `cd` command)
+2. `Code Review` completed (kiro-cli returned review)
+3. `Tend Concerns` **failed** (kiro-cli error — output truncated at 3966 chars)
+4. `Validate Changes` **skipped** (upstream `Tend Concerns` failed)
+5. `Needs more Attention?` **skipped** (upstream `Validate Changes` skipped)
+6. Gate's `on_true` edge re-enqueued `Validate Changes`
+7. `Validate Changes` checked upstream → `Needs more Attention?` is skipped → skip
+8. `Validate Changes` enqueued `Needs more Attention?` via `next` edge
+9. `Needs more Attention?` checked upstream → `Validate Changes` is skipped → skip
+10. **Steps 6-9 repeated infinitely** until Ctrl+C
+
+### Three Contributing Bugs
+1. **Runner has no re-processing guard** — `enqueue_downstream` doesn't check if a node was already processed
+2. **DrawflowConverter doesn't wire `only_if` guards** — gate output is ignored
+3. **Gate condition is hardcoded `"true"`** — should evaluate based on previous node's output
 
 ---
 
-## Priority Action Items
+## Recommended Priority
 
-### Must Fix Before Any Deployment
-
-1. **Enable `force_ssl`** in production.rb
-2. **Fix Dockerfile** Ruby version: `3.2.2` → `3.4.8`
-3. **Add authentication** (Rails 8 generator or manual)
-4. **Add authorization** (Pundit or equivalent)
-5. **Address `eval` in DrawflowConverter** — document as intentional for trusted users or sandbox it
-6. **Remove `.permit!`** — validate drawflow_data structure explicitly
-7. **Enable CSP** — uncomment and configure content_security_policy.rb
-8. **Fix `agents#new`** — don't create records on GET requests
-
-### Should Fix Soon
-
-9. Add Rails-level tests (models, controllers, at minimum)
-10. Add missing foreign key and index on `default_agent_id`
-11. Add CHECK constraint on `workflow_runs.status`
-12. Add pagination to all index actions
-13. Fix `arrowsTarget` missing from Stimulus controller
-14. Add `rescue_from` in ApplicationController
-15. Add `aria-label` to icon-only buttons
-16. Add form labels with proper `for` attributes
-
-### Track as Tech Debt
-
-17. Decompose `workflow_editor_controller.js` into smaller controllers
-18. Extract job logic into a service object
-19. Add ViewComponent tests
-20. Add run cleanup/archival strategy
-21. Add rate limiting with `rack-attack`
-22. Delete junk file `[0m[0m[0m` from project root
-23. Add `.env.example` documenting required env vars
-24. Add `aria-live` regions for dynamic content updates
-
----
-
-## What's Done Well
-
-- **KiroFlow engine design** — Clean DSL, proper separation of concerns, thread-safe context, well-tested (61 tests)
-- **Database design** — UUIDs everywhere, JSONB for flexible data, proper foreign keys on workflow_runs
-- **Stimulus editor** — Sophisticated visual editor with undo/redo, keyboard shortcuts, drag-and-drop linking, loop detection
-- **CI pipeline** — Comprehensive: security scanning, linting, tests, system tests
-- **ViewComponent library** — 17 reusable components under proper namespace
-- **Ruby 3.4 idioms** — Uses `it` block parameter, mutable string buffers (`+""`)
-- **Kamal 2 deployment** — Properly configured with Thruster, Solid Queue in Puma
+1. **Fix the runner infinite loop** (C1) — add processed-node guard
+2. **Fix gate wiring in DrawflowConverter** (C2) — wire `only_if`/`unless_node`
+3. **Add authentication** (B2) — even basic session auth
+4. **Replace `eval()` with safe DSL** (B1) — or gate behind auth as interim
+5. **Add model + controller tests** (C4)
+6. **Add stale run recovery** (C5)
+7. **Fix N+1 and missing indexes** (M1, M6)
+8. **Set up I18n** (M5)

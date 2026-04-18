@@ -65,8 +65,30 @@ module KiroFlow
     def compute_in_degree
       deg = Hash.new(0)
       @workflow.nodes.each_key { deg[it] = 0 }
-      @workflow.edges.each_value { |tos| tos.each { deg[it] += 1 } }
+      back_edges = detect_back_edges
+      @workflow.edges.each do |from, tos|
+        tos.each { |to| deg[to] += 1 unless back_edges.include?([from, to]) }
+      end
       deg
+    end
+
+    def detect_back_edges
+      visited = Set.new
+      in_stack = Set.new
+      back = Set.new
+      dfs = ->(node) do
+        visited << node; in_stack << node
+        (@workflow.edges[node] || []).each do |to|
+          if in_stack.include?(to)
+            back << [node, to]
+          elsif !visited.include?(to)
+            dfs.(to)
+          end
+        end
+        in_stack.delete(node)
+      end
+      @workflow.nodes.each_key { dfs.(it) unless visited.include?(it) }
+      back
     end
 
     def run_node(node_name, context, in_degree, ready)

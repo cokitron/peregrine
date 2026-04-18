@@ -1,5 +1,4 @@
 require "open3"
-require "shellwords"
 require "timeout"
 require "fileutils"
 
@@ -16,7 +15,7 @@ module KiroFlow
       Timeout.timeout(opts.fetch(:timeout, 300)) do
         IO.popen(cmd, err: [:child, :out]) do |io|
           io.each_line do |line|
-            clean = line.gsub(ANSI_RE, "")
+            clean = line.force_encoding("UTF-8").scrub("").gsub(ANSI_RE, "")
             output << clean
             File.write(live_file, output)
           end
@@ -40,8 +39,8 @@ module KiroFlow
       end
       parts.push("--agent", opts[:agent].to_s) if opts[:agent]
       parts.push("--model", opts[:model].to_s) if opts[:model]
-      parts << Shellwords.escape(prompt)
-      parts.join(" ")
+      parts << prompt
+      parts
     end
   end
 end
