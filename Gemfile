@@ -36,4 +36,5 @@ end
 group :test do
   gem "capybara"
   gem "selenium-webdriver"
+  gem "prop_check", "~> 1.0"
 end

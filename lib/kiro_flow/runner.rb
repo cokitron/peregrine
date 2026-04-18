@@ -20,7 +20,7 @@ module KiroFlow
       in_degree = compute_in_degree
 
       ready = Queue.new
-      @workflow.roots.each { ready << it }
+      in_degree.each { |node, deg| ready << node if deg <= 0 }
 
       active_threads = []
 
