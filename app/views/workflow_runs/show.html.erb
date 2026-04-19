@@ -91,9 +91,22 @@
           <%# Node output %>
           <% if output.present? %>
             <details class="border-t border-borde" <%= state_str == "completed" || state_str == "failed" ? "open" : "" %>>
-              <summary class="px-4 py-2 text-xs text-gris cursor-pointer hover:text-grafito">Output (<%= output.length %> chars)</summary>
+              <summary class="px-4 py-2 text-xs text-gris cursor-pointer hover:text-grafito">Console Output (<%= output.length %> chars)</summary>
               <div class="px-4 py-3 bg-fondo text-sm text-grafito overflow-x-auto max-h-96 overflow-y-auto leading-relaxed"><%= render_node_output(output) %></div>
             </details>
+          <% end %>
+
+          <%# Artifacts — files created/modified by this node %>
+          <% artifacts = @artifacts&.dig(step["name"]) %>
+          <% if artifacts.present? %>
+            <% artifacts.each do |artifact| %>
+              <details class="border-t border-borde">
+                <summary class="px-4 py-2 text-xs font-medium text-kreoz-green cursor-pointer hover:text-grafito">
+                  📄 <%= artifact[:path] %> (<%= artifact[:content].length %> chars)
+                </summary>
+                <div class="px-4 py-3 bg-fondo text-sm text-grafito overflow-x-auto max-h-[32rem] overflow-y-auto leading-relaxed"><%= render_node_output(artifact[:content]) %></div>
+              </details>
+            <% end %>
           <% end %>
         </div>
       <% end %>

@@ -12,6 +12,8 @@ module KiroFlow
       live_file = File.join(context.run_dir, "#{name}.live")
       output = +""
 
+      head_before = capture_head
+
       Timeout.timeout(opts.fetch(:timeout, 600)) do
         IO.popen(cmd, err: [:child, :out]) do |io|
           io.each_line do |line|
@@ -24,6 +26,7 @@ module KiroFlow
 
       raise "KiroNode #{name} failed (exit #{$?.exitstatus})" unless $?.success?
       FileUtils.rm_f(live_file)
+      snapshot_artifacts(context.run_dir, head_before)
       output.strip
     end
 
@@ -41,6 +44,31 @@ module KiroFlow
       parts.push("--model", opts[:model].to_s) if opts[:model]
       parts << prompt
       parts
+    end
+
+    def capture_head
+      Open3.capture2("git", "rev-parse", "HEAD").first.strip rescue nil
+    end
+
+    def snapshot_artifacts(run_dir, head_before)
+      head_after = capture_head
+      return if head_before.nil? || head_after.nil? || head_before == head_after
+
+      changed, = Open3.capture2("git", "diff", "--name-only", head_before, head_after)
+      files = changed.strip.split("\n").reject(&:empty?)
+      return if files.empty?
+
+      artifact_dir = File.join(run_dir, "#{name}_artifacts")
+      FileUtils.mkdir_p(artifact_dir)
+
+      files.each do |rel_path|
+        next unless File.exist?(rel_path)
+        dest = File.join(artifact_dir, rel_path)
+        FileUtils.mkdir_p(File.dirname(dest))
+        FileUtils.cp(rel_path, dest)
+      end
+    rescue
+      nil # never fail on artifact capture
     end
   end
 end

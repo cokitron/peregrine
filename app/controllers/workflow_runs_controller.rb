@@ -11,7 +11,7 @@ class WorkflowRunsController < ApplicationController
   def show
     respond_to do |format|
       format.json { render json: { status: @run.status, node_states: @run.node_states, error_message: @run.error_message } }
-      format.html { @full_outputs = load_full_outputs }
+      format.html { @full_outputs = load_full_outputs; @artifacts = load_artifacts }
     end
   end
 
@@ -45,6 +45,18 @@ class WorkflowRunsController < ApplicationController
     return {} if @run.run_dir.blank?
     (@run.node_states || {}).each_with_object({}) do |(name, _), h|
       h[name] = KiroFlow::Persistence.read_node_output(@run.run_dir, name)
+    end
+  end
+
+  def load_artifacts
+    return {} if @run.run_dir.blank?
+    (@run.node_states || {}).each_with_object({}) do |(name, _), h|
+      dir = File.join(@run.run_dir, "#{name}_artifacts")
+      next unless Dir.exist?(dir)
+      h[name] = Dir.glob("#{dir}/**/*").select { |f| File.file?(f) }.map do |path|
+        rel = path.sub("#{dir}/", "")
+        { path: rel, content: File.read(path).encode("UTF-8", invalid: :replace, undef: :replace, replace: "") }
+      end
     end
   end
 end
