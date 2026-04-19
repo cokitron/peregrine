@@ -92,7 +92,7 @@
           <% if output.present? %>
             <details class="border-t border-borde" <%= state_str == "completed" || state_str == "failed" ? "open" : "" %>>
               <summary class="px-4 py-2 text-xs text-gris cursor-pointer hover:text-grafito">Output (<%= output.length %> chars)</summary>
-              <pre class="px-4 py-3 bg-fondo text-xs text-grafito font-mono overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto"><%= output %></pre>
+              <div class="px-4 py-3 bg-fondo text-sm text-grafito overflow-x-auto max-h-96 overflow-y-auto leading-relaxed"><%= render_node_output(output) %></div>
             </details>
           <% end %>
         </div>
