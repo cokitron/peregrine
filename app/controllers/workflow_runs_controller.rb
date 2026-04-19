@@ -11,7 +11,7 @@ class WorkflowRunsController < ApplicationController
   def show
     respond_to do |format|
       format.json { render json: { status: @run.status, node_states: @run.node_states, error_message: @run.error_message } }
-      format.html
+      format.html { @full_outputs = load_full_outputs }
     end
   end
 
@@ -39,5 +39,12 @@ class WorkflowRunsController < ApplicationController
 
   def page_offset
     [ (params[:page].to_i - 1), 0 ].max * PER_PAGE
+  end
+
+  def load_full_outputs
+    return {} if @run.run_dir.blank?
+    (@run.node_states || {}).each_with_object({}) do |(name, _), h|
+      h[name] = KiroFlow::Persistence.read_node_output(@run.run_dir, name)
+    end
   end
 end

@@ -64,7 +64,7 @@
         <% s = node_style(step["type"]) %>
         <% state = node_states[step["name"]] %>
         <% state_str = state.is_a?(Hash) ? state["status"] : state %>
-        <% output = state.is_a?(Hash) ? state["output"] : nil %>
+        <% output = @full_outputs&.dig(step["name"]) || (state.is_a?(Hash) ? state["output"] : nil) %>
 
         <div class="card overflow-hidden">
           <%# Node header %>
