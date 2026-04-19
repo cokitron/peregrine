@@ -12,7 +12,7 @@ module KiroFlow
       live_file = File.join(context.run_dir, "#{name}.live")
       output = +""
 
-      Timeout.timeout(opts.fetch(:timeout, 300)) do
+      Timeout.timeout(opts.fetch(:timeout, 600)) do
         IO.popen(cmd, err: [:child, :out]) do |io|
           io.each_line do |line|
             clean = line.force_encoding("UTF-8").scrub("").gsub(ANSI_RE, "")

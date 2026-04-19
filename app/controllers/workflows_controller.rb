@@ -63,7 +63,7 @@ class WorkflowsController < ApplicationController
     end
   end
 
-  ALLOWED_STEP_KEYS = %w[ type name prompt command code condition next on_true on_false agent_id model workflow_id disabled ].freeze
+  ALLOWED_STEP_KEYS = %w[ type name prompt command code condition next on_true on_false agent_id model timeout workflow_id disabled ].freeze
 
   private
 

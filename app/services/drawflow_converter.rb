@@ -35,6 +35,7 @@ class DrawflowConverter
           opts = { type: :kiro, prompt: s["prompt"] || "" }
           opts[:agent] = agent_slug if agent_slug
           opts[:model] = s["model"] if s["model"].present?
+          opts[:timeout] = s["timeout"].to_i if s["timeout"].present?
           wf.node(name, **opts)
         when :shell
           wf.node(name, type: :shell, command: s["command"] || "echo ok")

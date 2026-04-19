@@ -8,7 +8,7 @@ class WorkflowExecutionService
     broadcast(type: "status", status: "running")
 
     wf = DrawflowConverter.call(@run.workflow_definition.drawflow_data, default_agent_id: @run.workflow_definition.default_agent_id)
-    runner = KiroFlow::Runner.new(wf)
+    runner = KiroFlow::Runner.new(wf, after_node_execute: method(:log_node_execution))
     run_dir = KiroFlow::Persistence.generate_run_dir
 
     ctx = nil
@@ -62,5 +62,11 @@ class WorkflowExecutionService
 
   def broadcast(data)
     ActionCable.server.broadcast("workflow_run_#{@run.id}", data)
+  end
+
+  def log_node_execution(node:, status:, duration:, output_size:, error:)
+    Rails.logger.tagged("KiroFlow", "Run:#{@run.id}") do
+      Rails.logger.info("[#{status}] #{node} — #{duration}s, output: #{output_size || 0} bytes#{error ? ", error: #{error}" : ""}")
+    end
   end
 end

@@ -4,13 +4,14 @@ module KiroFlow
 
     attr_reader :state, :timings, :errors
 
-    def initialize(workflow)
+    def initialize(workflow, after_node_execute: nil)
       @workflow = workflow
       @state = {}
       @timings = {}
       @errors = {}
       @mutex = Mutex.new
       @cancelled = false
+      @after_node_execute = after_node_execute
     end
 
     def cancel!
@@ -108,6 +109,7 @@ module KiroFlow
       if should_skip?(node, context)
         @mutex.synchronize { @state[node_name] = :skipped }
         log(:skip, node_name)
+        instrument(node_name, :skipped, nil, nil, nil)
         enqueue_downstream(node_name, in_degree, ready)
         return
       end
@@ -127,6 +129,7 @@ module KiroFlow
           @timings[node_name] = duration
         end
         log(:done, node_name, duration)
+        instrument(node_name, :completed, duration, output&.size, nil)
       rescue => e
         duration = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
         @mutex.synchronize do
@@ -135,6 +138,7 @@ module KiroFlow
           @errors[node_name] = e.message
         end
         log(:fail, node_name, duration, e.message)
+        instrument(node_name, :failed, duration, nil, e.message)
       end
 
       enqueue_downstream(node_name, in_degree, ready)
@@ -164,6 +168,12 @@ module KiroFlow
       @workflow.upstream(node.name).any? do |up|
         @mutex.synchronize { @state[up] == :failed || @state[up] == :skipped }
       end
+    end
+
+    def instrument(node_name, status, duration, output_size, error)
+      @after_node_execute&.call(node: node_name, status: status, duration: duration&.round(2), output_size: output_size, error: error)
+    rescue
+      nil # never fail on instrumentation
     end
 
     def log(event, node_name, duration = nil, message = nil)
